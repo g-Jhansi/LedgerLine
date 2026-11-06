@@ -79,3 +79,4 @@ mvn spring-boot:run
 mvn test
 ```
 All integration and security tests run against the automated in-memory test configuration.
+

@@ -80,3 +80,4 @@ public class AuthResponse {
         this.expiresInMs = expiresInMs;
     }
 }
+

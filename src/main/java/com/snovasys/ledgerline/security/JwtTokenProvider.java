@@ -111,3 +111,4 @@ public class JwtTokenProvider {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
     }
 }
+

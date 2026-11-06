@@ -48,3 +48,4 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Users retrieved successfully", users));
     }
 }
+

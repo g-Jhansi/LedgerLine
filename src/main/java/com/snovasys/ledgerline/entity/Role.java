@@ -5,3 +5,4 @@ public enum Role {
     ROLE_ACCOUNT_HOLDER,
     ROLE_AUDITOR
 }
+
