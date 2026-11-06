@@ -1,0 +1,25 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IDEs ###
+.idea
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+### OS Files ###
+.DS_Store
+Thumbs.db
+*.log
