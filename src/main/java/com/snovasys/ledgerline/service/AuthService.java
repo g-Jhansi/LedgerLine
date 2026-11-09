@@ -4,6 +4,8 @@ import com.snovasys.ledgerline.dto.AuthResponse;
 import com.snovasys.ledgerline.dto.LoginRequest;
 import com.snovasys.ledgerline.dto.RegisterRequest;
 import com.snovasys.ledgerline.dto.UserResponse;
+import com.snovasys.ledgerline.entity.AuditAction;
+import com.snovasys.ledgerline.entity.AuditStatus;
 import com.snovasys.ledgerline.entity.Role;
 import com.snovasys.ledgerline.entity.User;
 import com.snovasys.ledgerline.exception.BadRequestException;
@@ -25,15 +27,18 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
+    private final AuditService auditService;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider jwtTokenProvider,
-                       AuthenticationManager authenticationManager) {
+                       AuthenticationManager authenticationManager,
+                       AuditService auditService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.authenticationManager = authenticationManager;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -58,6 +63,9 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
 
+        auditService.logAction(AuditAction.USER_REGISTER, savedUser.getUsername(), savedUser.getRole().name(),
+                "USER", savedUser.getId().toString(), "User registration successful", AuditStatus.SUCCESS);
+
         String token = jwtTokenProvider.generateToken(savedUser.getUsername(), savedUser.getRole().name());
 
         return new AuthResponse(
@@ -71,25 +79,34 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getUsername().trim(), request.getPassword())
-        );
+        try {
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getUsername().trim(), request.getPassword())
+            );
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+            SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        User user = userRepository.findByUsername(request.getUsername().trim())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+            User user = userRepository.findByUsername(request.getUsername().trim())
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        String token = jwtTokenProvider.generateToken(user.getUsername(), user.getRole().name());
+            String token = jwtTokenProvider.generateToken(user.getUsername(), user.getRole().name());
 
-        return new AuthResponse(
-                token,
-                user.getUsername(),
-                user.getEmail(),
-                user.getFullName(),
-                user.getRole(),
-                jwtTokenProvider.getExpirationMs()
-        );
+            auditService.logAction(AuditAction.USER_LOGIN, user.getUsername(), user.getRole().name(),
+                    "USER", user.getId().toString(), "User login successful", AuditStatus.SUCCESS);
+
+            return new AuthResponse(
+                    token,
+                    user.getUsername(),
+                    user.getEmail(),
+                    user.getFullName(),
+                    user.getRole(),
+                    jwtTokenProvider.getExpirationMs()
+            );
+        } catch (Exception ex) {
+            auditService.logAction(AuditAction.USER_LOGIN_FAILED, request.getUsername().trim(), "ANONYMOUS",
+                    "USER", null, "Login failed: " + ex.getMessage(), AuditStatus.FAILURE);
+            throw ex;
+        }
     }
 
     public UserResponse getCurrentUser() {

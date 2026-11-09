@@ -51,6 +51,7 @@ public class SecurityConfig {
                         ).permitAll()
                         // Role-specific endpoints
                         .requestMatchers("/api/auth/admin/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/governance/**").hasAnyAuthority("ROLE_AUDITOR", "ROLE_ADMIN")
                         .requestMatchers("/api/auditor/**").hasAuthority("ROLE_AUDITOR")
                         // All other API endpoints require authentication
                         .anyRequest().authenticated()

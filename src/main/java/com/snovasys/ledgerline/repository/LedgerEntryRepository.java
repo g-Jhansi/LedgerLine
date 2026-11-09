@@ -30,5 +30,11 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, Long> 
            "COALESCE(SUM(CASE WHEN e.entryType = 'CREDIT' THEN e.amount ELSE CAST(0 AS java.math.BigDecimal) END), CAST(0 AS java.math.BigDecimal)) " +
            "FROM LedgerEntry e")
     BigDecimal calculateLedgerImbalance();
+
+    @Query("SELECT COALESCE(SUM(e.amount), CAST(0 AS java.math.BigDecimal)) FROM LedgerEntry e WHERE e.entryType = 'DEBIT'")
+    BigDecimal sumTotalDebits();
+
+    @Query("SELECT COALESCE(SUM(e.amount), CAST(0 AS java.math.BigDecimal)) FROM LedgerEntry e WHERE e.entryType = 'CREDIT'")
+    BigDecimal sumTotalCredits();
 }
 

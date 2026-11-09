@@ -4,6 +4,8 @@ import com.snovasys.ledgerline.dto.AccountResponse;
 import com.snovasys.ledgerline.dto.CreateAccountRequest;
 import com.snovasys.ledgerline.entity.Account;
 import com.snovasys.ledgerline.entity.AccountType;
+import com.snovasys.ledgerline.entity.AuditAction;
+import com.snovasys.ledgerline.entity.AuditStatus;
 import com.snovasys.ledgerline.entity.User;
 import com.snovasys.ledgerline.exception.BadRequestException;
 import com.snovasys.ledgerline.exception.ResourceNotFoundException;
@@ -11,6 +13,8 @@ import com.snovasys.ledgerline.repository.AccountRepository;
 import com.snovasys.ledgerline.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,10 +30,14 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
+    private final AuditService auditService;
 
-    public AccountService(AccountRepository accountRepository, UserRepository userRepository) {
+    public AccountService(AccountRepository accountRepository,
+                          UserRepository userRepository,
+                          AuditService auditService) {
         this.accountRepository = accountRepository;
         this.userRepository = userRepository;
+        this.auditService = auditService;
     }
 
     /**
@@ -51,6 +59,15 @@ public class AccountService {
 
         Account saved = accountRepository.save(account);
         log.info("Created account [{}] for user [{}]", accountNumber, owner.getUsername());
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String actor = (auth != null && auth.isAuthenticated()) ? auth.getName() : "ADMIN";
+        String role = (auth != null && !auth.getAuthorities().isEmpty()) ?
+                auth.getAuthorities().iterator().next().getAuthority() : "ROLE_ADMIN";
+
+        auditService.logAction(AuditAction.ACCOUNT_CREATED, actor, role,
+                "ACCOUNT", accountNumber, "Created " + request.getAccountType() + " account for " + owner.getUsername(),
+                AuditStatus.SUCCESS);
 
         return AccountResponse.fromEntity(saved);
     }

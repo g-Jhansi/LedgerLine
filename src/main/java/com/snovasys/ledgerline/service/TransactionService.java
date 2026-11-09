@@ -13,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,15 +41,18 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final AccountService accountService;
+    private final AuditService auditService;
 
     public TransactionService(AccountRepository accountRepository,
                               TransactionRepository transactionRepository,
                               LedgerEntryRepository ledgerEntryRepository,
-                              AccountService accountService) {
+                              AccountService accountService,
+                              AuditService auditService) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.accountService = accountService;
+        this.auditService = auditService;
     }
 
     /**
@@ -112,6 +117,9 @@ public class TransactionService {
 
         log.info("DEPOSIT completed: {} {} → account [{}], ref [{}]",
                 amount, userAccount.getCurrency(), userAccountNumber, referenceId);
+
+        recordAuditLog(AuditAction.DEPOSIT, referenceId,
+                "Deposited " + amount + " to account " + userAccountNumber);
 
         return buildTransactionResponse(transaction);
     }
@@ -184,6 +192,9 @@ public class TransactionService {
 
         log.info("WITHDRAWAL completed: {} {} from account [{}], ref [{}]",
                 amount, userAccount.getCurrency(), userAccountNumber, referenceId);
+
+        recordAuditLog(AuditAction.WITHDRAWAL, referenceId,
+                "Withdrew " + amount + " from account " + userAccountNumber);
 
         return buildTransactionResponse(transaction);
     }
@@ -259,6 +270,9 @@ public class TransactionService {
         log.info("TRANSFER completed: {} {} from [{}] → [{}], ref [{}]",
                 amount, sourceAccount.getCurrency(),
                 request.getFromAccountNumber(), request.getToAccountNumber(), referenceId);
+
+        recordAuditLog(AuditAction.TRANSFER, referenceId,
+                "Transferred " + amount + " from " + request.getFromAccountNumber() + " to " + request.getToAccountNumber());
 
         return buildTransactionResponse(transaction);
     }
@@ -346,6 +360,19 @@ public class TransactionService {
         response.setLedgerEntries(entries);
 
         return response;
+    }
+
+    private void recordAuditLog(AuditAction action, String referenceId, String details) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            String actor = (auth != null && auth.isAuthenticated()) ? auth.getName() : "SYSTEM";
+            String role = (auth != null && !auth.getAuthorities().isEmpty()) ?
+                    auth.getAuthorities().iterator().next().getAuthority() : "ROLE_USER";
+
+            auditService.logAction(action, actor, role, "TRANSACTION", referenceId, details, AuditStatus.SUCCESS);
+        } catch (Exception ex) {
+            log.warn("Could not log transaction audit event: {}", ex.getMessage());
+        }
     }
 }
 
