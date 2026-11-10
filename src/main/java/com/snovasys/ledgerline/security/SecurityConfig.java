@@ -39,6 +39,7 @@ public class SecurityConfig {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
+                .headers(headers -> headers.frameOptions(frame -> frame.disable()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints
@@ -48,6 +49,7 @@ public class SecurityConfig {
                                 "/favicon.ico",
                                 "/static/**",
                                 "/assets/**",
+                                "/h2-console/**",
                                 "/api/health",
                                 "/api/auth/register",
                                 "/api/auth/login",
