@@ -1,6 +1,6 @@
 # LedgerLine - Safe Financial Ledger Platform
 
-> **Hiring Challenge**: Solving unsafe money movement in financial applications with double-entry accounting, strict balance conservation, concurrency-safe locking, idempotency protection, and tamper-evident audit trails.
+> **Hiring Challenge**: Solving unsafe money movement in financial applications with double-entry accounting, strict balance conservation, concurrency-safe locking, idempotency protection, tamper-evident audit trails, and an interactive React dashboard.
 
 ---
 
@@ -12,88 +12,62 @@
 | **Day 2** | **Account Domain, Double-Entry Ledger Core & Strict Balance Conservation** | **COMPLETED** | Account entity, Double-Entry Ledger entries (`Debit` = `Credit`), System Clearing Accounts (`SYS-CLEARING-001`), Zero-sum money movement invariant, Non-negative balance server checks, Statement API. |
 | **Day 3** | **Concurrency Control, Simultaneous Withdrawal Safety & Idempotency Engine** | **COMPLETED** | Pessimistic Locking (`SELECT ... FOR UPDATE`), Deadlock-free ordered lock acquisition, Race condition elimination under high concurrent load, `Idempotency-Key` header & SHA-256 replay cache, Deposit / Withdraw / Transfer APIs. |
 | **Day 4** | **Append-Only Immutable Audit Trail & Regulatory Governance APIs** | **COMPLETED** | Cryptographic tamper-evident Audit Log entity (blockchain-style SHA-256 hash chaining), Actor tracking, IP & User-Agent capture, Automated audit events on all mutations, Auditor inspection endpoints, Real-time ledger balance conservation verification ($\sum \text{Debits} - \sum \text{Credits} = 0$), Audit chain validation API, 32/32 Automated Tests Passing. |
-| **Day 5** | **React Dashboard Integration, End-to-End Testing, Deployment & Submission Packaging** | Scheduled | React + Vite UI integration, Interactive dashboards for Account Holders, Auditors, and Admins, Docker configuration, Deployment guide, Six hiring questions documentation. |
+| **Day 5** | **React Dashboard Integration, Dockerization, Hiring Challenge Answers & Packaging** | **COMPLETED** | Embedded & standalone React 18 SPA UI with Tailwind CSS, Quick-Role switcher, Live balance cards, Deposit/Withdraw/Transfer modals with Idempotency replay testing, Double-entry statement viewer, Cryptographic hash chain inspector, Multi-stage Dockerfiles & Docker Compose, Comprehensive `HIRING_QUESTIONS.md`. |
 
 ---
 
-## Day 1 Architecture & Implementation Details
+## Architecture Overview
 
-### 1. Key Security & Integrity Decisions
-- **Stateless JWT Security**: The API uses standard HMAC-SHA256 tokens (`JwtTokenProvider`) verified on every request through `JwtAuthenticationFilter`.
-- **Role-Based Access Control (RBAC)**:
-  - `ROLE_ADMIN`: Platform administrator with full access to user and account management.
-  - `ROLE_AUDITOR`: Read-only compliance auditor with access to transaction statements, audit trails, and regulatory governance tools.
-  - `ROLE_ACCOUNT_HOLDER`: End-user customer who owns accounts and initiates deposits, withdrawals, and transfers.
-- **Password Protection**: Passwords are never stored in plaintext; all credentials are encrypted using `BCryptPasswordEncoder` with salted hashes.
-- **Consistent API Contract**: Standardized JSON responses for both success (`ApiResponse<T>`) and error conditions (`GlobalExceptionHandler`), ensuring consistent HTTP status codes (`400`, `401`, `403`, `404`, `409`, `422`, `500`).
-- **Data Seeding**: Automated `CommandLineRunner` (`DataInitializer`) seeds default user accounts and financial accounts on first startup.
+```mermaid
+flowchart TD
+    Client["Client / React Dashboard (Vite / Static SPA)"]
+    API["Spring Boot Backend API (Port 8080)"]
+    Auth["JWT Security & RBAC (Admin, Auditor, Account Holder)"]
+    Idemp["Distributed Idempotency Engine (SHA-256 Fingerprint + 24h TTL)"]
+    TxSvc["Transaction Engine (Pessimistic Row Locking + Lexicographical Order)"]
+    Ledger["Double-Entry Ledger (Debit == Credit, Zero-Sum Invariant)"]
+    Audit["Tamper-Evident Audit Trail (SHA-256 Blockchain Hash Chaining)"]
+    DB[("PostgreSQL 16 Database")]
 
----
-
-## Day 2 Architecture & Implementation Details
-
-### 1. Core Domain Entities
-- **`Account`**: Represents financial accounts with unique 12-digit account numbers (e.g. `LL1000000001`), account types (`SAVINGS`, `CHECKING`, `SYSTEM`), currency (`INR`), and precision balance tracking (`BigDecimal(19, 4)`).
-- **`LedgerEntry`**: Immutable double-entry bookkeeping records with `DEBIT` and `CREDIT` classifications, running balance after transaction (`balance_after`), and transaction references.
-- **`Transaction`**: Financial unit of work grouping source account, target account, amount, status (`COMPLETED`, `PENDING`, `FAILED`), and audit metadata.
-
-### 2. Double-Entry Accounting Core
-- Every money movement produces **exactly two balanced entries**:
-  - **DEPOSIT**: `DEBIT` on System Clearing Account (`SYS-CLEARING-001`), `CREDIT` on User Account.
-  - **WITHDRAWAL**: `DEBIT` on User Account, `CREDIT` on System Clearing Account (`SYS-CLEARING-001`).
-  - **TRANSFER**: `DEBIT` on Source Account, `CREDIT` on Target Account.
-- **Conservation Invariant**: $\sum \text{Debits} - \sum \text{Credits} = 0$. Money is never created from nothing nor destroyed; system clearing accounts maintain the global zero-sum balance.
-- **Non-Negative Balance Protection**: Pre-transaction checks enforce that user balances cannot drop below zero (`InsufficientBalanceException` $\rightarrow$ `422 Unprocessable Entity`).
+    Client -->|HTTP / REST + JWT| API
+    API --> Auth
+    Auth --> Idemp
+    Idemp --> TxSvc
+    TxSvc --> Ledger
+    Ledger --> DB
+    TxSvc --> Audit
+    Audit --> DB
+```
 
 ---
 
-## Day 3 Architecture & Implementation Details
+## Hiring Challenge Deep Dive
 
-### 1. Concurrency Control & Race Condition Safety
-- **Pessimistic Write Locking (`SELECT ... FOR UPDATE`)**: 
-  - Annotated on `AccountRepository.findByAccountNumberWithLock()`.
-  - Row-level database locks ensure only one transaction can mutate an account's balance at any given millisecond, eliminating simultaneous withdrawal race conditions and double-spending.
-- **Deadlock-Free Lock Acquisition**:
-  - In transfers involving two accounts, locks are always acquired in deterministic lexicographical order (`accountNumber1.compareTo(accountNumber2) <= 0`).
-  - Prevents circular dependency deadlocks when two users simultaneously transfer money to each other.
+Detailed architectural solutions, formal proofs, and code analyses for the six challenge problems are documented in [**`HIRING_QUESTIONS.md`**](file:///d:/LedgerLine/HIRING_QUESTIONS.md):
 
-### 2. Idempotency Engine & Replay Protection
-- **`Idempotency-Key` Header Support**: Clients can supply a unique UUID or token in the `Idempotency-Key` HTTP request header for all mutating endpoints (`/deposit`, `/withdraw`, `/transfer`).
-- **Cryptographic Hash Verification**: The request payload is hashed using SHA-256 (`request_hash`). If the same key is supplied with conflicting parameters, the engine returns `409 Conflict` (`DuplicateTransactionException`).
-- **Replay Cache**: Retried requests with identical keys and hashes return the cached transaction response without re-executing balance mutations.
-- **Automatic TTL Cleanup**: Records expire after 24 hours and are cleaned up on a scheduled basis.
+1. **Strict Double-Entry Bookkeeping & Balance Conservation**: Mathematical balance invariant ($\sum \text{Debits} - \sum \text{Credits} = 0$) and System Clearing Account mechanics.
+2. **Concurrency Control & Race Condition Elimination**: Pessimistic write locking (`SELECT ... FOR UPDATE`), preventing double-spend and simultaneous overdrafts.
+3. **Distributed Idempotency Engine**: `Idempotency-Key` header interception, SHA-256 payload fingerprinting, 24-hour replay caching, and duplicate request safety.
+4. **Cryptographic Tamper-Evident Audit Trail**: Blockchain-style SHA-256 hash chaining with automated tamper detection and proof traversal.
+5. **Deadlock Prevention in Multi-Party Transfers**: Mathematical proof of total ordering via deterministic lexicographical lock ordering (`A < B`).
+6. **Real-Time Regulatory Governance**: Real-time solvency checks, zero-sum reconciliation APIs, and auditor role segregation.
 
 ---
 
-## Day 4 Architecture & Implementation Details
+## Day 5: React Dashboard & UI Features
 
-### 1. Tamper-Evident Cryptographic Audit Trail
-- **Blockchain-Style Hash Chaining**: Every `AuditLog` entry contains:
-  - `previousHash`: The SHA-256 hash of the immediate prior audit log entry (genesis block uses 64 zeros).
-  - `currentHash`: Calculated as $\text{SHA-256}(\text{previousHash} \parallel \text{action} \parallel \text{actor} \parallel \text{entityType} \parallel \text{entityId} \parallel \text{details} \parallel \text{status} \parallel \text{timestamp})$.
-- **Tamper Detection**: If any row is altered, inserted, or deleted in the database, the cryptographic link is severed. The verification algorithm scans the chain and identifies the exact tampered record ID and discrepancy.
+The application includes an interactive **React 18 Single-Page Application (SPA)** that works both out-of-the-box embedded in Spring Boot (`/index.html`) and as a standalone Vite + React development project (`/frontend`):
 
-### 2. Automated Event Capture & Actor Tracking
-- Automated audit log generation runs across all state changes:
-  - **Auth Events**: `USER_REGISTER`, `USER_LOGIN` (with `SUCCESS`), `USER_LOGIN_FAILED` (with `FAILURE`).
-  - **Account Operations**: `ACCOUNT_CREATED`.
-  - **Transaction Operations**: `DEPOSIT`, `WITHDRAWAL`, `TRANSFER`.
-  - **Compliance Operations**: `INTEGRITY_CHECK`.
-- Captures full actor metadata:
-  - `actorUsername`, `actorRole`
-  - `ipAddress` (with reverse proxy and `X-Forwarded-For` resolution)
-  - `userAgent` (client browser/device tracking)
-  - `entityType`, `entityId`, descriptive details, and timestamp.
-
-### 3. Regulatory Governance & Integrity APIs
-- **Double-Entry Global Conservation Check (`GET /api/governance/verify-ledger`)**:
-  - Calculates real-time $\sum \text{Debits} - \sum \text{Credits}$ across all ledger entries in the entire system.
-  - Confirms global zero-sum money conservation.
-- **Audit Chain Verification (`GET /api/governance/verify-chain`)**:
-  - Validates cryptographic hash continuity across all historical audit records.
-  - Reports whether the audit trail is valid or flags any tampered record.
-- **Governance Executive Summary (`GET /api/governance/summary`)**:
-  - Aggregates platform-wide metrics: total users, active accounts, completed transactions, audit log count, gross deposit/withdrawal/transfer volume, and real-time ledger & audit health indicators.
+- **Quick-Role Switcher**: Switch instantaneously between `ROLE_ADMIN` (`admin`), `ROLE_ACCOUNT_HOLDER` (`john_doe`), and `ROLE_AUDITOR` (`auditor`) with single-click authentication.
+- **Live Account Balances**: Real-time balance cards with account types (`SAVINGS`, `CHECKING`, `SYSTEM`).
+- **Interactive Financial Operations**:
+  - **Deposit**: Move money from institutional clearing reserves into customer accounts.
+  - **Withdrawal**: Disallow overdrafts with instant server-enforced validation.
+  - **Transfer**: Inter-account transfers with real-time debit and credit feedback.
+  - **Idempotency Testing Toggle**: Generates a persistent UUID key to test instant cache replays vs new executions.
+- **Double-Entry Statement Inspector**: Live tabular view of immutable ledger entries showing Debit (`SYS-CLEARING` or Source) and Credit (`User` or Destination) legs.
+- **Cryptographic Hash Chain Inspector**: Visualizes the tamper-evident SHA-256 audit log blockchain with unbroken link indicators and Genesis block anchor.
+- **Regulatory Governance Dashboard**: Executive metric cards showing system solvency, total deposit/withdrawal volumes, and zero-sum conservation status ($\Delta = \$0.00$).
 
 ---
 
@@ -108,7 +82,7 @@
 
 ---
 
-## API Endpoints (Day 1 – Day 4)
+## API Reference
 
 ### Authentication & User Management (Day 1)
 | Method | Endpoint | Access | Description |
@@ -136,10 +110,10 @@
 | `GET` | `/api/transactions/account/{accountNumber}` | Authenticated | Paginated transaction history for an account |
 | `GET` | `/api/transactions/statement/{accountNumber}` | Authenticated | Paginated double-entry statement (audit entries) |
 
-### Regulatory Governance & Audit Trail (Day 4)
+### Regulatory Governance & Cryptographic Audit Trail (Day 4)
 | Method | Endpoint | Access | Description |
 |:---|:---|:---|:---|
-| `GET` | `/api/governance/audit-logs` | `ROLE_AUDITOR`, `ROLE_ADMIN` | Paginated search of audit logs (filters: actor, action, entityType, date range) |
+| `GET` | `/api/governance/audit-logs` | `ROLE_AUDITOR`, `ROLE_ADMIN` | Paginated search of audit logs (filters: actor, action, entityType) |
 | `GET` | `/api/governance/audit-logs/{id}` | `ROLE_AUDITOR`, `ROLE_ADMIN` | Retrieve single audit log with cryptographic hash proof |
 | `GET` | `/api/governance/verify-chain` | `ROLE_AUDITOR`, `ROLE_ADMIN` | Verify cryptographic hash chain integrity across all audit records |
 | `GET` | `/api/governance/verify-ledger` | `ROLE_AUDITOR`, `ROLE_ADMIN` | Real-time validation that $\sum \text{Debits} - \sum \text{Credits} = 0$ |
@@ -149,72 +123,70 @@
 
 ## Automated Test Suite
 
-LedgerLine includes an end-to-end suite of automated integration and unit tests covering Day 1 through Day 4:
+LedgerLine includes **32 automated tests** covering security, double-entry bookkeeping, pessimistic concurrency locking, idempotency replay, cryptographic hash verification, and dynamic tamper detection:
 
-```bash
+```cmd
 mvn test
 ```
+*(Or use `.\mvnw.cmd test`)*
 
-### Test Coverage Highlights (32/32 Passing)
-- **`AuthControllerTest` (8 Tests)**:
-  - Health check UP validation
-  - User registration & JWT generation
-  - Valid and invalid login authentication
-  - Protected endpoint 401 Unauthorized handling
-  - Profile retrieval (`/api/auth/me`)
-  - Role-based authorization enforcement (`ROLE_ADMIN` vs `ROLE_ACCOUNT_HOLDER`)
-- **`TransactionControllerTest` (13 Tests)**:
-  - Admin account provisioning (`POST /api/accounts`)
-  - RBAC protection forbidding non-admins from creating accounts
-  - User account enumeration (`GET /api/accounts/me`)
-  - Account detail lookup (`GET /api/accounts/{accountNumber}`)
-  - Concurrency-safe deposit with double-entry validation (DEBIT clearing, CREDIT user)
-  - Withdrawal with balance deduction and non-negative balance verification
-  - Overdraft rejection (`422 Unprocessable Entity` on insufficient balance)
-  - Inter-account transfers with balanced ledger entries
-  - Self-transfer rejection (`400 Bad Request`)
-  - Idempotent request replay protection (duplicate `Idempotency-Key` returns cached response without duplicate balance modification)
-  - Transaction retrieval by reference ID
-  - Paginated account statement inspection
-  - Unauthenticated transaction rejection
-- **`GovernanceControllerTest` (10 Tests)**:
-  - Auditor paginated audit log retrieval (`GET /api/governance/audit-logs`)
-  - Auditor single audit log inspection with cryptographic hash verification (`GET /api/governance/audit-logs/{id}`)
-  - Cryptographic audit chain validation (`GET /api/governance/verify-chain`)
-  - Real-time double-entry ledger balance conservation validation (`GET /api/governance/verify-ledger`)
-  - Executive compliance dashboard metrics summary (`GET /api/governance/summary`)
-  - Admin access validation for governance endpoints
-  - RBAC protection forbidding Account Holders from accessing governance endpoints (`403 Forbidden`)
-  - Unauthenticated request rejection (`401 Unauthorized`)
-  - Automatic audit log creation upon transaction execution (Deposit $\rightarrow$ `AuditLog`)
-  - Cryptographic tamper detection test: dynamically detects unauthorized database mutations and flags the exact corrupted record ID
-- **`LedgerLineApplicationTests` (1 Test)**:
-  - Spring Boot application context load verification
+### Test Suite Summary (32/32 Passing)
+- **`AuthControllerTest` (8 tests)**: Registration, JWT login, authentication failure, role escalation blocking, profile retrieval.
+- **`TransactionControllerTest` (13 tests)**: Deposits, withdrawals, overdraft rejection (422), inter-account transfers, self-transfer blocking, double-entry balance validation, and idempotency key replay caching.
+- **`GovernanceControllerTest` (10 tests)**: Audit log search, single record hash proof, ledger zero-sum verification, governance summary metrics, RBAC boundary enforcement, and **dynamic database tamper detection test** (deliberately corrupts an audit row and confirms verification flags the exact broken record ID).
+- **`LedgerLineApplicationTests` (1 test)**: Spring context verification.
 
 ---
 
-## How to Run the Application
+## Deployment & Running Options
 
-### Prerequisites
+### Option 1: One-Command Docker Compose (Production Ready)
+Spin up PostgreSQL, the Spring Boot backend, and the Nginx-hosted React frontend in isolated containers:
+
+```bash
+docker compose up --build
+```
+
+- **React Web App**: `http://localhost:3000` (or `http://localhost:8080/index.html`)
+- **Backend API**: `http://localhost:8080/api`
+- **PostgreSQL**: `localhost:5432`
+
+---
+
+### Option 2: Local Development (Spring Boot + Embedded React SPA)
+
+#### 1. Prerequisites
 - **Java 21 (JDK 21)**
-- **Maven 3.9+** (or included `mvnw.cmd` / `mvnw`)
-- **PostgreSQL 14+** (running on port `5432` with database `ledgerline_db`)
+- **PostgreSQL 14+** (database `ledgerline_db` running on port 5432)
 
-### 1. Database Setup
+#### 2. Start PostgreSQL
 ```sql
 CREATE DATABASE ledgerline_db;
 ```
 
-### 2. Start the Backend
-Set your PostgreSQL password and run:
+#### 3. Start Spring Boot Backend
 ```cmd
 set "DB_PASSWORD=YOUR_POSTGRES_PASSWORD"
 mvn spring-boot:run
 ```
-*(Or use `mvnw.cmd spring-boot:run`)*
+*(Or use `.\mvnw.cmd spring-boot:run`)*
 
-### 3. Run Automated Tests
-```cmd
-mvn test
+#### 4. Open the Interactive Dashboard
+Navigate directly to:
 ```
-All tests run against the isolated in-memory H2 PostgreSQL-compatible test configuration.
+http://localhost:8080/index.html
+```
+
+---
+
+### Option 3: Standalone React Frontend (Vite Dev Server)
+
+If you wish to run the standalone frontend in hot-reloading development mode:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will run at `http://localhost:5173` and proxy requests to `http://localhost:8080`.

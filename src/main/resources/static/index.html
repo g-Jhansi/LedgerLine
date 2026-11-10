@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LedgerLine - Financial Ledger & Audit Platform</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for in-browser JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_BASE = window.location.origin;
+
+        // Custom Fetch with JWT & Idempotency Key
+        async function apiCall(endpoint, method = 'GET', body = null, token = null, idempotencyKey = null) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
+            const config = { method, headers };
+            if (body && (method === 'POST' || method === 'PUT')) {
+                config.body = JSON.stringify(body);
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, config);
+                const data = await res.json().catch(() => ({}));
+                return { ok: res.ok, status: res.status, data };
+            } catch (err) {
+                return { ok: false, status: 500, data: { message: err.message || 'Network request failed' } };
+            }
+        }
+
+        function App() {
+            const [token, setToken] = useState(localStorage.getItem('ledgerline_token') || null);
+            const [user, setUser] = useState(JSON.parse(localStorage.getItem('ledgerline_user') || 'null'));
+            const [health, setHealth] = useState(null);
+            const [activeTab, setActiveTab] = useState('accounts');
+            const [accounts, setAccounts] = useState([]);
+            const [transactions, setTransactions] = useState([]);
+            const [statementAccount, setStatementAccount] = useState(null);
+            const [statement, setStatement] = useState([]);
+            const [auditLogs, setAuditLogs] = useState([]);
+            const [ledgerIntegrity, setLedgerIntegrity] = useState(null);
+            const [chainIntegrity, setChainIntegrity] = useState(null);
+            const [govSummary, setGovSummary] = useState(null);
+            const [usersList, setUsersList] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [alert, setAlert] = useState(null);
+
+            // Modal state
+            const [modalType, setModalType] = useState(null); // 'deposit' | 'withdraw' | 'transfer' | 'createAccount'
+            const [selectedAccount, setSelectedAccount] = useState('');
+            const [amount, setAmount] = useState('');
+            const [description, setDescription] = useState('');
+            const [transferTarget, setTransferTarget] = useState('');
+            const [useIdempotency, setUseIdempotency] = useState(true);
+            const [idempotencyKey, setIdempotencyKey] = useState(crypto.randomUUID());
+
+            // Check health
+            useEffect(() => {
+                apiCall('/api/health').then(r => {
+                    if (r.ok) setHealth(r.data);
+                });
+            }, []);
+
+            // Load data when user changes
+            useEffect(() => {
+                if (token && user) {
+                    loadDataForRole(user.role);
+                }
+            }, [token, user]);
+
+            const showAlert = (message, type = 'success') => {
+                setAlert({ message, type });
+                setTimeout(() => setAlert(null), 5000);
+            };
+
+            const loadDataForRole = async (role) => {
+                setLoading(true);
+                if (role === 'ROLE_ACCOUNT_HOLDER') {
+                    const accRes = await apiCall('/api/accounts/me', 'GET', null, token);
+                    if (accRes.ok && accRes.data.data) {
+                        setAccounts(accRes.data.data);
+                        if (accRes.data.data.length > 0) {
+                            loadStatement(accRes.data.data[0].accountNumber);
+                        }
+                    }
+                } else if (role === 'ROLE_AUDITOR') {
+                    setActiveTab('governance');
+                    loadGovernanceData();
+                } else if (role === 'ROLE_ADMIN') {
+                    const accRes = await apiCall('/api/accounts/me', 'GET', null, token);
+                    if (accRes.ok && accRes.data.data) setAccounts(accRes.data.data);
+                    const usersRes = await apiCall('/api/auth/admin/users', 'GET', null, token);
+                    if (usersRes.ok && usersRes.data.data) setUsersList(usersRes.data.data);
+                    loadGovernanceData();
+                }
+                setLoading(false);
+            };
+
+            const loadStatement = async (accountNumber) => {
+                setStatementAccount(accountNumber);
+                const res = await apiCall(`/api/transactions/statement/${accountNumber}?size=20`, 'GET', null, token);
+                if (res.ok && res.data.data) {
+                    setStatement(res.data.data.content || []);
+                }
+            };
+
+            const loadGovernanceData = async () => {
+                const [ledgerRes, chainRes, sumRes, logsRes] = await Promise.all([
+                    apiCall('/api/governance/verify-ledger', 'GET', null, token),
+                    apiCall('/api/governance/verify-chain', 'GET', null, token),
+                    apiCall('/api/governance/summary', 'GET', null, token),
+                    apiCall('/api/governance/audit-logs?size=25', 'GET', null, token)
+                ]);
+
+                if (ledgerRes.ok) setLedgerIntegrity(ledgerRes.data.data);
+                if (chainRes.ok) setChainIntegrity(chainRes.data.data);
+                if (sumRes.ok) setGovSummary(sumRes.data.data);
+                if (logsRes.ok && logsRes.data.data) setAuditLogs(logsRes.data.data.content || []);
+            };
+
+            const handleLogin = async (username, password) => {
+                setLoading(true);
+                const res = await apiCall('/api/auth/login', 'POST', { username, password });
+                setLoading(false);
+                if (res.ok && res.data.data) {
+                    const auth = res.data.data;
+                    setToken(auth.token);
+                    setUser(auth);
+                    localStorage.setItem('ledgerline_token', auth.token);
+                    localStorage.setItem('ledgerline_user', JSON.stringify(auth));
+                    showAlert(`Welcome back, ${auth.fullName}!`);
+                } else {
+                    showAlert(res.data.message || 'Login failed', 'error');
+                }
+            };
+
+            const handleLogout = () => {
+                setToken(null);
+                setUser(null);
+                localStorage.removeItem('ledgerline_token');
+                localStorage.removeItem('ledgerline_user');
+                setAccounts([]);
+                setStatement([]);
+                setAuditLogs([]);
+                showAlert('Logged out successfully');
+            };
+
+            const handleTransactionSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                const key = useIdempotency ? idempotencyKey : null;
+                let res;
+
+                if (modalType === 'deposit') {
+                    res = await apiCall('/api/transactions/deposit', 'POST', {
+                        accountNumber: selectedAccount,
+                        amount: parseFloat(amount),
+                        description: description || 'Account Deposit'
+                    }, token, key);
+                } else if (modalType === 'withdraw') {
+                    res = await apiCall('/api/transactions/withdraw', 'POST', {
+                        accountNumber: selectedAccount,
+                        amount: parseFloat(amount),
+                        description: description || 'Account Withdrawal'
+                    }, token, key);
+                } else if (modalType === 'transfer') {
+                    res = await apiCall('/api/transactions/transfer', 'POST', {
+                        fromAccountNumber: selectedAccount,
+                        toAccountNumber: transferTarget,
+                        amount: parseFloat(amount),
+                        description: description || 'Account Transfer'
+                    }, token, key);
+                }
+
+                setLoading(false);
+                if (res && res.ok) {
+                    showAlert(`${modalType.toUpperCase()} successful! Ref: ${res.data.data.referenceId}`);
+                    setModalType(null);
+                    setAmount('');
+                    setDescription('');
+                    setTransferTarget('');
+                    setIdempotencyKey(crypto.randomUUID());
+                    // Refresh data
+                    loadDataForRole(user.role);
+                } else {
+                    showAlert(res?.data?.message || 'Transaction rejected by ledger rules', 'error');
+                }
+            };
+
+            const handleCreateAccount = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                const res = await apiCall('/api/accounts', 'POST', {
+                    accountName: description,
+                    ownerUsername: selectedAccount,
+                    accountType: transferTarget || 'SAVINGS',
+                    currency: 'INR'
+                }, token);
+                setLoading(false);
+                if (res.ok) {
+                    showAlert(`Account ${res.data.data.accountNumber} created successfully!`);
+                    setModalType(null);
+                    setDescription('');
+                    setSelectedAccount('');
+                    loadDataForRole(user.role);
+                } else {
+                    showAlert(res.data.message || 'Failed to create account', 'error');
+                }
+            };
+
+            if (!token || !user) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950">
+                        <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-xl">
+                            <div className="text-center mb-8">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 mb-3">
+                                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <h1 className="text-2xl font-bold tracking-tight text-white">LedgerLine</h1>
+                                <p className="text-sm text-slate-400 mt-1">Safe Financial Ledger & Double-Entry Platform</p>
+                                {health && (
+                                    <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                        Backend {health.status} • PostgreSQL Connected
+                                    </div>
+                                )}
+                            </div>
+
+                            {alert && (
+                                <div className={`mb-6 p-4 rounded-xl text-sm border ${alert.type === 'error' ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+                                    {alert.message}
+                                </div>
+                            )}
+
+                            <div className="space-y-3 mb-6">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Quick-Login As Seed User:</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => handleLogin('john_doe', 'User@123')} className="p-3 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-left transition">
+                                        <div className="text-xs font-semibold text-emerald-400">Account Holder</div>
+                                        <div className="text-sm text-white font-medium">john_doe</div>
+                                    </button>
+                                    <button onClick={() => handleLogin('jane_smith', 'User@123')} className="p-3 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-left transition">
+                                        <div className="text-xs font-semibold text-emerald-400">Account Holder</div>
+                                        <div className="text-sm text-white font-medium">jane_smith</div>
+                                    </button>
+                                    <button onClick={() => handleLogin('auditor', 'Auditor@123')} className="p-3 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-left transition">
+                                        <div className="text-xs font-semibold text-blue-400">Auditor</div>
+                                        <div className="text-sm text-white font-medium">auditor</div>
+                                    </button>
+                                    <button onClick={() => handleLogin('admin', 'Admin@123')} className="p-3 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-left transition">
+                                        <div className="text-xs font-semibold text-purple-400">Administrator</div>
+                                        <div className="text-sm text-white font-medium">admin</div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+                    {/* Header */}
+                    <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-40">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h1 className="text-lg font-bold tracking-tight text-white">LedgerLine</h1>
+                                    <span className="text-xs text-slate-400">Safe Financial Core</span>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs">
+                                    <span className="text-slate-300 font-medium">{user.username}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${user.role === 'ROLE_ADMIN' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : user.role === 'ROLE_AUDITOR' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                                        {user.role.replace('ROLE_', '')}
+                                    </span>
+                                </div>
+                                <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation Tabs */}
+                    <div className="border-b border-slate-800 bg-slate-900/30">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-6">
+                            {(user.role === 'ROLE_ACCOUNT_HOLDER' || user.role === 'ROLE_ADMIN') && (
+                                <button onClick={() => setActiveTab('accounts')} className={`py-4 text-sm font-semibold border-b-2 transition ${activeTab === 'accounts' ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+                                    My Accounts & Transfers
+                                </button>
+                            )}
+                            {(user.role === 'ROLE_AUDITOR' || user.role === 'ROLE_ADMIN') && (
+                                <button onClick={() => { setActiveTab('governance'); loadGovernanceData(); }} className={`py-4 text-sm font-semibold border-b-2 transition ${activeTab === 'governance' ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+                                    Audit & Governance
+                                </button>
+                            )}
+                            {user.role === 'ROLE_ADMIN' && (
+                                <button onClick={() => setActiveTab('admin')} className={`py-4 text-sm font-semibold border-b-2 transition ${activeTab === 'admin' ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+                                    User Management
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Alert Banner */}
+                    {alert && (
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 w-full">
+                            <div className={`p-4 rounded-xl text-sm border flex items-center justify-between ${alert.type === 'error' ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+                                <span>{alert.message}</span>
+                                <button onClick={() => setAlert(null)} className="text-xs font-bold opacity-60 hover:opacity-100">Dismiss</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Content */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
+                        {activeTab === 'accounts' && (
+                            <div className="space-y-8">
+                                {/* Account Cards */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-lg font-bold text-white">Your Financial Accounts</h2>
+                                        {user.role === 'ROLE_ADMIN' && (
+                                            <button onClick={() => { setModalType('createAccount'); setSelectedAccount(user.username); }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition">
+                                                + New Account
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {accounts.length === 0 ? (
+                                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
+                                            No accounts found for this user.
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {accounts.map(acc => (
+                                                <div key={acc.accountNumber} className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-6 transition shadow-lg relative overflow-hidden">
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <div>
+                                                            <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase tracking-wide">
+                                                                {acc.accountType}
+                                                            </span>
+                                                            <h3 className="text-base font-semibold text-white mt-1">{acc.accountName}</h3>
+                                                        </div>
+                                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                                            {acc.status}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="font-mono text-sm text-slate-400 tracking-wider mb-4">
+                                                        {acc.accountNumber}
+                                                    </div>
+
+                                                    <div className="text-3xl font-extrabold text-white mb-6">
+                                                        ₹{parseFloat(acc.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                        <span className="text-xs font-normal text-slate-400 ml-1.5">{acc.currency}</span>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-3 gap-2">
+                                                        <button onClick={() => { setModalType('deposit'); setSelectedAccount(acc.accountNumber); setIdempotencyKey(crypto.randomUUID()); }} className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-xl transition text-center">
+                                                            Deposit
+                                                        </button>
+                                                        <button onClick={() => { setModalType('withdraw'); setSelectedAccount(acc.accountNumber); setIdempotencyKey(crypto.randomUUID()); }} className="px-3 py-2 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-xl transition text-center">
+                                                            Withdraw
+                                                        </button>
+                                                        <button onClick={() => { setModalType('transfer'); setSelectedAccount(acc.accountNumber); setIdempotencyKey(crypto.randomUUID()); }} className="px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold rounded-xl transition text-center">
+                                                            Transfer
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Statement Table */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <h2 className="text-lg font-bold text-white">Double-Entry Ledger Statement</h2>
+                                            {statementAccount && (
+                                                <span className="font-mono text-xs text-indigo-400 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
+                                                    Account: {statementAccount}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <button onClick={() => statementAccount && loadStatement(statementAccount)} className="text-xs font-semibold text-slate-400 hover:text-white transition">
+                                            Refresh Statement
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-slate-800/50 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-800">
+                                                <tr>
+                                                    <th className="p-4">Date & Time</th>
+                                                    <th className="p-4">Txn Reference</th>
+                                                    <th className="p-4">Entry</th>
+                                                    <th className="p-4">Amount</th>
+                                                    <th className="p-4">Balance After</th>
+                                                    <th className="p-4">Description</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/60">
+                                                {statement.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="6" className="p-8 text-center text-slate-500">
+                                                            No transactions recorded for this account yet.
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    statement.map(st => (
+                                                        <tr key={st.id} className="hover:bg-slate-800/30 transition">
+                                                            <td className="p-4 text-slate-400 text-xs">{new Date(st.createdAt).toLocaleString()}</td>
+                                                            <td className="p-4 font-mono text-xs text-indigo-300">{st.transactionReference.substring(0, 8)}...</td>
+                                                            <td className="p-4">
+                                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${st.entryType === 'CREDIT' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                                                                    {st.entryType}
+                                                                </span>
+                                                            </td>
+                                                            <td className={`p-4 font-semibold ${st.entryType === 'CREDIT' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                {st.entryType === 'CREDIT' ? '+' : '-'}₹{parseFloat(st.amount).toFixed(2)}
+                                                            </td>
+                                                            <td className="p-4 font-mono text-xs text-white">₹{parseFloat(st.balanceAfter).toFixed(2)}</td>
+                                                            <td className="p-4 text-xs text-slate-300">{st.description}</td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'governance' && (
+                            <div className="space-y-8">
+                                {/* Governance Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    {/* Invariant Check */}
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="text-xs font-semibold text-slate-400 uppercase">Double-Entry Invariant</span>
+                                            {ledgerIntegrity && (
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${ledgerIntegrity.balanced ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                                                    {ledgerIntegrity.balanced ? 'BALANCED' : 'IMBALANCE'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-2xl font-black text-white mt-2">
+                                            {ledgerIntegrity ? (ledgerIntegrity.balanced ? 'Zero Imbalance' : `₹${ledgerIntegrity.netImbalance}`) : 'Verifying...'}
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-2">
+                                            Σ Debits = Σ Credits ({ledgerIntegrity?.totalLedgerEntries || 0} entries)
+                                        </div>
+                                    </div>
+
+                                    {/* Cryptographic Chain */}
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="text-xs font-semibold text-slate-400 uppercase">Audit Hash Chain</span>
+                                            {chainIntegrity && (
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${chainIntegrity.chainValid ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                                                    {chainIntegrity.chainValid ? 'TAMPER-PROOF' : 'COMPROMISED'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-2xl font-black text-white mt-2">
+                                            {chainIntegrity?.totalRecordsVerified || 0} Blocks
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-2">
+                                            SHA-256 block continuity verified
+                                        </div>
+                                    </div>
+
+                                    {/* Gross Volume */}
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                                        <span className="text-xs font-semibold text-slate-400 uppercase">Total Settled Volume</span>
+                                        <div className="text-2xl font-black text-white mt-2">
+                                            ₹{(parseFloat(govSummary?.totalDepositsVolume || 0) + parseFloat(govSummary?.totalTransfersVolume || 0)).toLocaleString()}
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-2">
+                                            Across {govSummary?.totalTransactions || 0} transactions
+                                        </div>
+                                    </div>
+
+                                    {/* Active Accounts */}
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                                        <span className="text-xs font-semibold text-slate-400 uppercase">System Footprint</span>
+                                        <div className="text-2xl font-black text-white mt-2">
+                                            {govSummary?.totalAccounts || 0} Accounts
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-2">
+                                            {govSummary?.totalUsers || 0} registered users
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Audit Logs Table */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-lg font-bold text-white">Tamper-Evident Immutable Audit Trail</h2>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => loadGovernanceData()} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition">
+                                                Re-Verify All
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-slate-800/50 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-800">
+                                                <tr>
+                                                    <th className="p-4">Block #</th>
+                                                    <th className="p-4">Action</th>
+                                                    <th className="p-4">Actor</th>
+                                                    <th className="p-4">Target Entity</th>
+                                                    <th className="p-4">Details</th>
+                                                    <th className="p-4">SHA-256 Current Hash</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/60">
+                                                {auditLogs.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="6" className="p-8 text-center text-slate-500">No audit records found.</td>
+                                                    </tr>
+                                                ) : (
+                                                    auditLogs.map(log => (
+                                                        <tr key={log.id} className="hover:bg-slate-800/30 transition">
+                                                            <td className="p-4 font-mono text-xs text-indigo-400">#{log.id}</td>
+                                                            <td className="p-4">
+                                                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700">
+                                                                    {log.action}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4 text-xs text-white">
+                                                                {log.actorUsername}
+                                                                <span className="text-[10px] text-slate-400 ml-1">({log.ipAddress})</span>
+                                                            </td>
+                                                            <td className="p-4 font-mono text-xs text-slate-300">
+                                                                {log.entityType}: {log.entityId || 'N/A'}
+                                                            </td>
+                                                            <td className="p-4 text-xs text-slate-300 max-w-xs truncate">{log.details}</td>
+                                                            <td className="p-4 font-mono text-xs text-emerald-400" title={log.currentHash}>
+                                                                {log.currentHash.substring(0, 16)}...
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'admin' && (
+                            <div className="space-y-8">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-bold text-white">Registered Users</h2>
+                                    <button onClick={() => { setModalType('createAccount'); setSelectedAccount('john_doe'); }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition">
+                                        Provision Financial Account
+                                    </button>
+                                </div>
+
+                                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-800/50 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-800">
+                                            <tr>
+                                                <th className="p-4">User ID</th>
+                                                <th className="p-4">Username</th>
+                                                <th className="p-4">Full Name</th>
+                                                <th className="p-4">Email</th>
+                                                <th className="p-4">Role</th>
+                                                <th className="p-4">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/60">
+                                            {usersList.map(u => (
+                                                <tr key={u.id} className="hover:bg-slate-800/30 transition">
+                                                    <td className="p-4 font-mono text-xs text-indigo-400">#{u.id}</td>
+                                                    <td className="p-4 font-semibold text-white">{u.username}</td>
+                                                    <td className="p-4 text-slate-300">{u.fullName}</td>
+                                                    <td className="p-4 text-slate-400 text-xs">{u.email}</td>
+                                                    <td className="p-4">
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ROLE_ADMIN' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : u.role === 'ROLE_AUDITOR' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                                                            {u.role.replace('ROLE_', '')}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4">
+                                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                                            ACTIVE
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Transaction Modal */}
+                    {modalType && (
+                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-lg font-bold text-white capitalize">{modalType} Funds</h3>
+                                    <button onClick={() => setModalType(null)} className="text-slate-400 hover:text-white">✕</button>
+                                </div>
+
+                                <form onSubmit={modalType === 'createAccount' ? handleCreateAccount : handleTransactionSubmit} className="space-y-4">
+                                    {modalType !== 'createAccount' ? (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Source Account</label>
+                                                <input type="text" readOnly value={selectedAccount} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-sm text-slate-300" />
+                                            </div>
+
+                                            {modalType === 'transfer' && (
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-slate-400 mb-1">Target Account Number</label>
+                                                    <input type="text" required placeholder="e.g. LL1000000002" value={transferTarget} onChange={e => setTransferTarget(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 font-mono text-sm text-white focus:outline-none focus:border-indigo-500" />
+                                                </div>
+                                            )}
+
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Amount (₹ INR)</label>
+                                                <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-lg font-bold text-white focus:outline-none focus:border-indigo-500" />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Description</label>
+                                                <input type="text" placeholder="Optional notes" value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500" />
+                                            </div>
+
+                                            {/* Idempotency Protection Toggle */}
+                                            <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-medium text-slate-300">Idempotency Protection</span>
+                                                    <input type="checkbox" checked={useIdempotency} onChange={e => setUseIdempotency(e.target.checked)} className="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0" />
+                                                </div>
+                                                {useIdempotency && (
+                                                    <div className="flex items-center gap-2">
+                                                        <input type="text" readOnly value={idempotencyKey} className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 font-mono text-[10px] text-slate-400" />
+                                                        <button type="button" onClick={() => setIdempotencyKey(crypto.randomUUID())} className="text-[10px] px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-semibold">
+                                                            New
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Owner Username</label>
+                                                <input type="text" required placeholder="e.g. john_doe" value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500" />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Account Name</label>
+                                                <input type="text" required placeholder="e.g. Vacation Savings" value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500" />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-400 mb-1">Account Type</label>
+                                                <select value={transferTarget} onChange={e => setTransferTarget(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                                    <option value="SAVINGS">SAVINGS</option>
+                                                    <option value="CHECKING">CHECKING</option>
+                                                </select>
+                                            </div>
+                                        </>
+                                    )}
+
+                                    <div className="flex gap-3 mt-6">
+                                        <button type="button" onClick={() => setModalType(null)} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition">
+                                            Cancel
+                                        </button>
+                                        <button type="submit" disabled={loading} className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl text-xs font-semibold text-white transition">
+                                            {loading ? 'Processing...' : 'Confirm'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
+
