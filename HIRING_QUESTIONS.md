@@ -36,10 +36,10 @@ Every money movement is represented by a parent `Transaction` and at least two i
 2. **CREDIT**: An offsetting entry of identical magnitude recording funds entering a destination or balancing equity.
 
 ```mermaid
-flowchart LR
-    A["Customer Account (ACC-1001)"] -- "DEBIT $250.00" --> TX["Transaction (REF-XYZ123)"]
-    TX -- "CREDIT $250.00" --> B["Customer Account (ACC-2002)"]
-    TX -. Invariant Checked .-> INV["Debits ($250.00) == Credits ($250.00)<br>Net Delta = $0.00"]
+graph LR
+    A[Customer Account ACC-1001] -->|DEBIT 250 INR| TX[Transaction REF-XYZ123]
+    TX -->|CREDIT 250 INR| B[Customer Account ACC-2002]
+    TX -.->|Invariant Checked| INV[Debits equal Credits - Net Delta 0.00]
 ```
 
 #### System Clearing Accounts for External Inflows/Outflows
@@ -189,21 +189,21 @@ Where:
 - $H_n = \text{currentHash}$
 
 ```mermaid
-flowchart TD
-    subgraph Record 1 [Genesis Record ID: 1]
-        P1["previousHash: 0000...0000"]
-        D1["Data: REGISTER, User: alice, Time: t1"]
-        C1["currentHash: a4f9e8..."]
+graph TD
+    subgraph R1 [Genesis Record ID 1]
+        P1[previousHash: 0000...0000]
+        D1[Data: REGISTER, User: alice]
+        C1[currentHash: a4f9e8...]
     end
-    subgraph Record 2 [Record ID: 2]
-        P2["previousHash: a4f9e8..."]
-        D2["Data: DEPOSIT, Acc: ACC-101, Time: t2"]
-        C2["currentHash: 7b31c0..."]
+    subgraph R2 [Record ID 2]
+        P2[previousHash: a4f9e8...]
+        D2[Data: DEPOSIT, Acc: ACC-101]
+        C2[currentHash: 7b31c0...]
     end
-    subgraph Record 3 [Record ID: 3]
-        P3["previousHash: 7b31c0..."]
-        D3["Data: TRANSFER, Ref: REF-001, Time: t3"]
-        C3["currentHash: e28d54..."]
+    subgraph R3 [Record ID 3]
+        P3[previousHash: 7b31c0...]
+        D3[Data: TRANSFER, Ref: REF-001]
+        C3[currentHash: e28d54...]
     end
 
     C1 ==> P2
@@ -292,19 +292,19 @@ Traditional banking systems perform reconciliation through nightly batch process
 LedgerLine provides dedicated, role-guarded endpoints accessible only by users with the `ROLE_AUDITOR` or `ROLE_ADMIN` authority.
 
 ```mermaid
-flowchart TD
-    AUD["Auditor Dashboard / Automated Job"] -->|GET /api/governance/summary| GS["GovernanceService"]
-    GS --> DB1[("Ledger Entries Table")]
-    GS --> DB2[("Audit Log Hash Chain")]
-    GS --> DB3[("Accounts Table")]
+graph TD
+    AUD[Auditor Dashboard] -->|GET governance summary| GS[GovernanceService]
+    GS --> DB1[(Ledger Entries Table)]
+    GS --> DB2[(Audit Log Hash Chain)]
+    GS --> DB3[(Accounts Table)]
 
-    GS --> C1{"Check: Sum(Debits) == Sum(Credits)"}
-    GS --> C2{"Check: Hash Chain Continuity"}
-    GS --> C3{"Check: Non-Negative Balances"}
+    GS --> C1{Check: Sum Debits equal Sum Credits}
+    GS --> C2{Check: Hash Chain Continuity}
+    GS --> C3{Check: Non-Negative Balances}
 
-    C1 -->|Pass/Fail| RPT["GovernanceSummaryDTO"]
-    C2 -->|Pass/Fail| RPT
-    C3 -->|Pass/Fail| RPT
+    C1 -->|Pass or Fail| RPT[GovernanceSummaryDTO]
+    C2 -->|Pass or Fail| RPT
+    C3 -->|Pass or Fail| RPT
 ```
 
 #### Real-Time Invariant Checks:

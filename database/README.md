@@ -15,7 +15,7 @@ This directory contains the database initialization scripts and relational archi
 ```mermaid
 erDiagram
     USERS ||--o{ ACCOUNTS : owns
-    ACCOUNTS ||--o{ TRANSACTIONS : "source / target"
+    ACCOUNTS ||--o{ TRANSACTIONS : participates
     TRANSACTIONS ||--|{ LEDGER_ENTRIES : contains
     ACCOUNTS ||--o{ LEDGER_ENTRIES : modifies
     USERS ||--o{ AUDIT_LOGS : performs

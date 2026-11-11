@@ -19,17 +19,17 @@
 ## Architecture Overview
 
 ```mermaid
-flowchart TD
-    Client["Client / React Dashboard (Vite / Static SPA)"]
-    API["Spring Boot Backend API (Port 8080)"]
-    Auth["JWT Security & RBAC (Admin, Auditor, Account Holder)"]
-    Idemp["Distributed Idempotency Engine (SHA-256 Fingerprint + 24h TTL)"]
-    TxSvc["Transaction Engine (Pessimistic Row Locking + Lexicographical Order)"]
-    Ledger["Double-Entry Ledger (Debit == Credit, Zero-Sum Invariant)"]
-    Audit["Tamper-Evident Audit Trail (SHA-256 Blockchain Hash Chaining)"]
-    DB[("PostgreSQL 16 Database")]
+graph TD
+    Client[React Dashboard SPA]
+    API[Spring Boot REST API]
+    Auth[JWT Security and RBAC]
+    Idemp[Distributed Idempotency Engine]
+    TxSvc[Transaction Engine - Pessimistic Locking]
+    Ledger[Double-Entry Ledger Core]
+    Audit[Tamper-Evident Audit Trail]
+    DB[(PostgreSQL Database)]
 
-    Client -->|HTTP / REST + JWT| API
+    Client -->|HTTP and REST| API
     API --> Auth
     Auth --> Idemp
     Idemp --> TxSvc
