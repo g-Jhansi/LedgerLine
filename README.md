@@ -41,6 +41,34 @@ flowchart TD
 
 ---
 
+## Repository Structure
+
+LedgerLine is organized into clean, modular directories for backend, frontend, and database:
+
+```
+LedgerLine/
+├── backend/                  # Java 21 / Spring Boot 4 REST API
+│   ├── src/                  # Domain entities, services, controllers, security, tests
+│   ├── pom.xml               # Maven configuration & dependencies
+│   ├── mvnw / mvnw.cmd       # Maven Wrapper binaries
+│   ├── Dockerfile            # Eclipse Temurin Java 21 multi-stage build
+│   └── README.md             # Backend instructions & quickstart
+├── frontend/                 # React 18 / Vite / Tailwind CSS Dashboard
+│   ├── src/                  # Single-Page Application components & styles
+│   ├── package.json          # Node dependencies & Vite build scripts
+│   ├── Dockerfile            # Multi-stage Node build + Nginx Alpine
+│   ├── nginx.conf            # Production reverse proxy to backend:8080
+│   └── README.md             # Frontend dev server & build guide
+├── database/                 # PostgreSQL Infrastructure
+│   ├── init.sql              # Production DDL schema, constraints, indexes & seed data
+│   └── README.md             # Relational ER diagrams & schema documentation
+├── docker-compose.yml        # 1-command orchestration for Postgres, Backend, and Frontend
+├── HIRING_QUESTIONS.md       # In-depth architectural proofs & technical challenge answers
+└── README.md                 # Complete project overview & roadmap
+```
+
+---
+
 ## Hiring Challenge Deep Dive
 
 Detailed architectural solutions, formal proofs, and code analyses for the six challenge problems are documented in [**`HIRING_QUESTIONS.md`**](file:///d:/LedgerLine/HIRING_QUESTIONS.md):
@@ -125,10 +153,10 @@ The application includes an interactive **React 18 Single-Page Application (SPA)
 
 LedgerLine includes **32 automated tests** covering security, double-entry bookkeeping, pessimistic concurrency locking, idempotency replay, cryptographic hash verification, and dynamic tamper detection:
 
-```cmd
-mvn test
+```powershell
+cd backend
+.\mvnw.cmd test
 ```
-*(Or use `.\mvnw.cmd test`)*
 
 ### Test Suite Summary (32/32 Passing)
 - **`AuthControllerTest` (8 tests)**: Registration, JWT login, authentication failure, role escalation blocking, profile retrieval.
@@ -157,21 +185,17 @@ docker compose up --build
 
 #### 1. Prerequisites
 - **Java 21 (JDK 21)**
-- **PostgreSQL 14+** (database `ledgerline_db` running on port 5432)
+- Included Maven Wrapper (`.\mvnw.cmd`)
 
-#### 2. Start PostgreSQL
-```sql
-CREATE DATABASE ledgerline_db;
+#### 2. Start Spring Boot Backend
+Navigate to the `backend` folder and run:
+```powershell
+cd backend
+.\mvnw.cmd spring-boot:run
 ```
+*(Runs with default zero-setup in-memory database and pre-seeded users and accounts)*
 
-#### 3. Start Spring Boot Backend
-```cmd
-set "DB_PASSWORD=YOUR_POSTGRES_PASSWORD"
-mvn spring-boot:run
-```
-*(Or use `.\mvnw.cmd spring-boot:run`)*
-
-#### 4. Open the Interactive Dashboard
+#### 3. Open the Interactive Dashboard
 Navigate directly to:
 ```
 http://localhost:8080/index.html
